@@ -1,13 +1,11 @@
 import re
 
-# Global variables to maintain editor state
-content = ""           # Current text content
-cursor = 0             # Cursor position (index of the character it's on)
+content = []           # Current text content as list of characters
+cursor = 0             # Cursor position (index of the character it's on, or len(content) if after last character)
 cursor_enabled = False # Whether the cursor is displayed
 undo_stack = []        # Stack to store previous states for undo
 command_history = []   # History of executed commands for repeat
 
-# Help text displayed when '?' is entered
 help_text = """
 ? - display this help info
 - - toggle row cursor on and off
@@ -26,22 +24,23 @@ r - repeat last command
 s - show content
 q - quit program
 """
+
 def save_state():
     """Save the current state (content and cursor) to the undo stack."""
     global undo_stack, content, cursor
-    undo_stack.append((content, cursor))
+    undo_stack.append((content.copy(), cursor))
 
 def display_content():
     """Display the current content, with cursor in green if enabled."""
-    if not cursor_enabled or not content:
-        print(content)
+    if not cursor_enabled:
+        print(''.join(content))
     else:
         if cursor == len(content):  # Cursor at end
-            print(content + '\033[42m' + ' ' + '\033[0m')
+            print(''.join(content) + '\033[42m' + ' ' + '\033[0m')
         elif 0 <= cursor < len(content):  # Cursor within content
-            print(content[:cursor] + '\033[42m' + content[cursor] + '\033[0m' + content[cursor+1:])
+            print(''.join(content[:cursor]) + '\033[42m' + content[cursor] + '\033[0m' + ''.join(content[cursor+1:]))
         else:
-            print(content)  # Fallback for invalid cursor
+            print(''.join(content))  # Fallback for invalid cursor
 
 def next_word_start(content, cursor):
     """Find the starting index of the next word after the cursor."""
@@ -80,14 +79,12 @@ def execute_command(command):
     """Execute the given command and update the editor state."""
     global content, cursor, cursor_enabled, undo_stack, command_history
     
-    # Toggle cursor visibility
     if command == '-':
         save_state()
         cursor_enabled = not cursor_enabled
         command_history.append(command)
         return True
     
-    # Move cursor left
     elif command == 'h':
         save_state()
         if cursor > 0:
@@ -95,81 +92,75 @@ def execute_command(command):
         command_history.append(command)
         return True
     
-    # Move cursor right
     elif command == 'l':
         save_state()
-        if content and cursor < len(content) - 1:
+        if cursor < len(content):
             cursor += 1
         command_history.append(command)
         return True
     
-    # Move cursor to beginning
     elif command == 'A':
         save_state()
         cursor = 0
         command_history.append(command)
         return True
     
-    # Move cursor to end
     elif command == '$':
         save_state()
         cursor = len(content) - 1 if content else 0
         command_history.append(command)
         return True
     
-    # Move cursor to next word
     elif command == 'w':
         save_state()
         cursor = next_word_start(content, cursor)
         command_history.append(command)
         return True
     
-    # Move cursor to previous word
     elif command == 'b':
         save_state()
         cursor = previous_word_start(content, cursor)
         command_history.append(command)
         return True
     
-    # Insert text before cursor
     elif re.match(r'^i(.+)', command):
         text = re.match(r'^i(.+)', command).group(1)
         save_state()
-        content = content[:cursor] + text + content[cursor:]
-        # Cursor moves to the beginning of inserted text
+        content[cursor:cursor] = list(text)
+        # Cursor remains at the same position
         command_history.append(command)
         return True
     
-    # Append text after cursor
     elif re.match(r'^a(.+)', command):
         text = re.match(r'^a(.+)', command).group(1)
         save_state()
-        content = content[:cursor + 1] + text + content[cursor + 1:]
-        cursor = cursor + len(text)  # Cursor moves to end of appended text
+        insert_pos = min(cursor + 1, len(content))
+        content[insert_pos:insert_pos] = list(text)
+        cursor = insert_pos + len(text) - 1 if text else cursor
         command_history.append(command)
         return True
     
-    # Delete character at cursor
-    elif command == 'x' and content:
+    elif command == 'x' and 0 <= cursor < len(content):
         save_state()
-        content = content[:cursor] + content[cursor + 1:]
-        cursor = min(cursor, len(content) - 1) if content else 0
+        del content[cursor]
+        if cursor >= len(content):
+            cursor = len(content) - 1 if content else 0
         command_history.append(command)
         return True
     
-    # Delete from cursor to start of next word or end
     elif command == 'dw':
         save_state()
-        next_pos = next_word_start(content, cursor)
-        if next_pos > cursor:
-            content = content[:cursor] + content[next_pos:]
-        else:
-            content = content[:cursor]
-        cursor = min(cursor, len(content) - 1) if content else 0
+        if cursor < len(content):
+            next_pos = next_word_start(content, cursor)
+            if next_pos > cursor:
+                del content[cursor:next_pos]
+            else:
+                del content[cursor:]
+            if cursor >= len(content):
+                cursor = len(content) - 1 if content else 0
         command_history.append(command)
         return True
     
-    # Undo last command
     elif command == 'u':
         if undo_stack:
             prev_content, prev_cursor = undo_stack.pop()
@@ -180,7 +171,6 @@ def execute_command(command):
             return True
         return False  # Nothing to undo
     
-    # Repeat last command
     elif command == 'r':
         if command_history:
             last_command = command_history[-1]
@@ -190,11 +180,9 @@ def execute_command(command):
             return True
         return False  # No command to repeat
     
-    # Show content (displayed anyway, so just return True)
     elif command == 's':
         return True
     
-    # Invalid command
     return False
 
 # Main loop to run the editor
@@ -207,6 +195,5 @@ while True:
     elif command == '?':
         print(help_text)
     else:
-        # Execute command and display content if successful
         if execute_command(command):
             display_content()
