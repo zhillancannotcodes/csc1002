@@ -8,10 +8,10 @@ command_history = []   # History of executed commands for repeat
 
 help_text = """
 ? - display this help info
-- - toggle row cursor on and off
+. - toggle row cursor on and off
 h - move cursor left
 l - move cursor right
-A - move cursor to beginning of the line
+^ - move cursor to beginning of the line
 $ - move cursor to end of the line
 w - move cursor to beginning of next word
 b - move cursor to beginning of previous word
@@ -79,7 +79,7 @@ def execute_command(command):
     """Execute the given command and update the editor state."""
     global content, cursor, cursor_enabled, undo_stack, command_history
     
-    if command == '-':
+    if command == '.':
         save_state()
         cursor_enabled = not cursor_enabled
         command_history.append(command)
@@ -99,7 +99,7 @@ def execute_command(command):
         command_history.append(command)
         return True
     
-    elif command == 'A':
+    elif command == '^':
         save_state()
         cursor = 0
         command_history.append(command)
