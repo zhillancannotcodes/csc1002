@@ -25,13 +25,13 @@ import random
 import time
 
 # global constants
-YOUR_ID = '124040006'
+YOUR_ID = '124040006' # TODO: your student id
 COLORS = ('red', 'blue', 'green', 'yellow', 'purple', 'orange', 'white')
 SHAPE_FILE = 'shapes.txt'
-SCREEN_DIM_X = 0.7
-SCREEN_DIM_Y = 0.7
-XY_SPAN = 0.8
-XY_STEP = 10
+SCREEN_DIM_X = 0.7 # screen width factor
+SCREEN_DIM_Y = 0.7 #screen height factor
+XY_SPAN = 0.8      # canvas factor
+XY_STEP = 10       # step size of x,y coordinates
 MIN_DURATION = 5    
 MAX_DURATION = 30
 MIN_STRETCH = 1
@@ -57,20 +57,137 @@ def is_shape_overlapped_any(pos:tuple, coords:list, stretch:float) -> bool:
     Returns:
         bool: True if shape overlaps with any existing shape
     '''
-    def get_bounding_box(pos, coords, stretch):
-        stretched = [(x * stretch + pos[0], y * stretch + pos[1]) for x, y in coords]
-        xs = [x for x, _ in stretched]
-        ys = [y for _, y in stretched]
-        return min(xs) - 1, max(xs) + 1, min(ys) - 1, max(ys) + 1
+    def pt_sub(p1, p2):
+        return (p1[0] - p2[0], p1[1] - p2[1])
+
+    def pt_cross(p1, p2):
+        return p1[0] * p2[1] - p1[1] * p2[0]
+
+    def pt_cross_with_points(p, a, b):
+        a_minus_p = pt_sub(a, p)
+        b_minus_p = pt_sub(b, p)
+        return pt_cross(a_minus_p, b_minus_p)
+
+    def sgn(x):
+        return 1 if x > 0 else (-1 if x < 0 else 0)
+
+    def inter1(a, b, c, d, buffer=3.5):
+        if a > b:
+            a, b = b, a
+        if c > d:
+            c, d = d, c
+        return max(a - buffer, c - buffer) <= min(b + buffer, d + buffer)
+
+    def expand_segment(start, end, buffer=3.5):
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = (dx**2 + dy**2)**0.5
+        if length < 1e-10:  # Handle very short segments
+            return (start[0] - buffer, start[1] - buffer), (end[0] + buffer, end[1] + buffer)
+        dx, dy = dx/length, dy/length
+        new_start = (start[0] - dx * buffer, start[1] - dy * buffer)
+        new_end = (end[0] + dx * buffer, end[1] + dy * buffer)
+        return new_start, new_end
+
+    def check_inter(a, b, c, d, buffer=3.5):
+        a_exp, b_exp = expand_segment(a, b, buffer)
+        c_exp, d_exp = expand_segment(c, d, buffer)
+        
+        if pt_cross_with_points(c_exp, a_exp, d_exp) == 0 and pt_cross_with_points(c_exp, b_exp, d_exp) == 0:
+            return (inter1(a[0], b[0], c[0], d[0], buffer) and 
+                    inter1(a[1], b[1], c[1], d[1], buffer))
+        return (sgn(pt_cross_with_points(a_exp, b_exp, c_exp)) != sgn(pt_cross_with_points(a_exp, b_exp, d_exp)) and
+                sgn(pt_cross_with_points(c_exp, d_exp, a_exp)) != sgn(pt_cross_with_points(c_exp, d_exp, b_exp)))
+
+    def point_in_polygon(point, polygon):
+        x, y = point
+        inside = False
+        n = len(polygon)
+        for i in range(n):
+            j = (i - 1) % n
+            xi, yi = polygon[i]
+            xj, yj = polygon[j]
+            if ((yi > y) != (yj > y) and 
+                x < (xj - xi) * (y - yi) / (yj - yi + 1e-10) + xi):
+                inside = not inside
+        return inside
+
+    def get_bounding_box(coords, buffer=3.5):
+        xs = [x for x, y in coords]
+        ys = [y for x, y in coords]
+        return (min(xs) - buffer, max(xs) + buffer, min(ys) - buffer, max(ys) + buffer)
+
+    def distance(p1, p2):
+        return ((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)**0.5
+
+    def point_to_segment_distance(p, seg_start, seg_end):
+        v = pt_sub(seg_end, seg_start)
+        w = pt_sub(p, seg_start)
+        length_squared = v[0]**2 + v[1]**2
+        if length_squared < 1e-10:
+            return distance(p, seg_start)
+        t = max(0, min(1, (w[0] * v[0] + w[1] * v[1]) / length_squared))
+        projection = (seg_start[0] + t * v[0], seg_start[1] + t * v[1])
+        return distance(p, projection)
+
+    # Convert coordinates to stretched position
+    new_coords = [(x * stretch + pos[0], y * stretch + pos[1]) for x, y in coords]
+    new_segments = [(new_coords[i], new_coords[(i + 1) % len(new_coords)]) 
+                   for i in range(len(new_coords))]
+    
+    # Get centroid of new shape for containment check
+    centroid_x = sum(x for x, y in new_coords) / len(new_coords)
+    centroid_y = sum(y for x, y in new_coords) / len(new_coords)
+    centroid = (centroid_x, centroid_y)
+
+    # Get bounding box of new shape with buffer
+    new_box = get_bounding_box(new_coords)
 
     for existing_pos, existing_coords, _ in g_shapes:
-        box1 = get_bounding_box(pos, coords, stretch)
-        box2 = get_bounding_box(existing_pos, existing_coords, stretch)
+        # Convert existing shape coordinates
+        exist_coords = [(x * stretch + existing_pos[0], y * stretch + existing_pos[1]) 
+                       for x, y in existing_coords]
+        exist_segments = [(exist_coords[i], exist_coords[(i + 1) % len(exist_coords)]) 
+                         for i in range(len(exist_coords))]
         
-        if not (box1[1] + 2 < box2[0] or box2[1] + 2 < box1[0] or 
-                box1[3] + 2 < box2[2] or box2[3] + 2 < box1[2]):
+        # Check bounding boxes first (with buffer)
+        exist_box = get_bounding_box(exist_coords)
+        if not (new_box[1] < exist_box[0] or exist_box[1] < new_box[0] or 
+                new_box[3] < exist_box[2] or exist_box[3] < new_box[2]):
+            # Check vertex proximity
+            buffer = 3.5
+            for new_vertex in new_coords:
+                for exist_vertex in exist_coords:
+                    if distance(new_vertex, exist_vertex) < buffer:
+                        return True
+                for seg_start, seg_end in exist_segments:
+                    if point_to_segment_distance(new_vertex, seg_start, seg_end) < buffer:
+                        return True
+            
+            for exist_vertex in exist_coords:
+                for seg_start, seg_end in new_segments:
+                    if point_to_segment_distance(exist_vertex, seg_start, seg_end) < buffer:
+                        return True
+            
+            # If bounding boxes overlap (including buffer), do detailed check
+            for seg1_start, seg1_end in new_segments:
+                for seg2_start, seg2_end in exist_segments:
+                    if check_inter(seg1_start, seg1_end, seg2_start, seg2_end):
+                        return True
+        
+        # Check if new shape is inside existing shape
+        if point_in_polygon(centroid, exist_coords):
             return True
+            
+        # Check if existing shape is inside new shape
+        exist_centroid_x = sum(x for x, y in exist_coords) / len(exist_coords)
+        exist_centroid_y = sum(y for x, y in exist_coords) / len(exist_coords)
+        exist_centroid = (exist_centroid_x, exist_centroid_y)
+        if point_in_polygon(exist_centroid, new_coords):
+            return True
+                    
     return False
+
 
 def create_shape(coords:list, color:str, stretch_factor:float) -> tuple:
     '''
@@ -233,8 +350,8 @@ def setup_screen() -> turtle.Screen:
     '''
     scrn = turtle.Screen()
     scrn.tracer(0)
-    scrn.setup(SCREEN_DIM_X, SCREEN_DIM_Y)
-    scrn.bgcolor("black")
+    scrn.setup(SCREEN_DIM_X,SCREEN_DIM_Y)
+    scrn.bgcolor("white")
     scrn.mode("logo")
     turtle.hideturtle()
     turtle.speed(0)
@@ -248,6 +365,7 @@ def show_result(started:float, count:int) -> None:
     start_time = get_time_str(started)
     end_time = get_time_str(ended)
     diff = round(ended - started, 1)
+    g_screen.bgcolor("black")  # Change to black after drawing is complete
     g_screen.title(f'{YOUR_ID} {start_time} - {end_time} - {diff} - {count}')
     print(f"{YOUR_ID} {start_time} - {end_time} - {diff} - {count}")
     print(f"{YOUR_ID}, {count}")
